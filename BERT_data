@@ -1,0 +1,75 @@
+import os
+import pandas as pd
+from tqdm import tqdm
+import torch
+from pytorch_transformers import BertTokenizer, BertModel, BertForMaskedLM
+import numpy
+import torch.nn.functional as F
+
+
+
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+train_df = pd.read_csv('train.csv')
+print( train_df.shape )
+train_df.head()
+
+data_out = pd.DataFrame()
+for i in range(0, len(train_df), 1):
+    words = train_df.discourse_text.iloc[i].split()
+    data = pd.DataFrame([[train_df.id.iloc[i]] * len(words), [train_df.discourse_start.iloc[i]] * len(words), words, [train_df.discourse_type.iloc[i]] * len(words)], ['id','start', 'words', 'label']).T
+    data_out = pd.concat((data_out, data))
+
+mapping = {"Lead":0, "Position" : 1, "Evidence":2, "Claim":3, "Counterclaim":4, "Rebuttal":5, "Concluding Statement" : 6}
+pad_label_tensor_out = torch.zeros(1, 512)
+pad_tokens_tensor_out = torch.zeros(1, 512)
+
+for name, essay in data_out.groupby('id'):
+    #make tensor of words to
+    words = essay.words.values
+    label = essay.label.values
+    label = [mapping[key] for key in label]
+    tokenized_text = words.tolist()
+    #tokenized_text = tokenizer.tokenize(numpy.array2string(words))
+    indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_text[0:512])
+    tokens_tensor = torch.tensor(indexed_tokens)[0:512]
+    label_tensor = torch.tensor(label)[0:512]
+    pad_tokens_tensor = torch.zeros((1, 512), device=tokens_tensor.device, dtype=tokens_tensor.dtype)
+    pad_tokens_tensor[:, 0:tokens_tensor.size(0)] = tokens_tensor
+    pad_label_tensor = torch.zeros((1,512), device=label_tensor.device, dtype=label_tensor.dtype)
+    pad_label_tensor[:, 0:tokens_tensor.size(0)] = label_tensor
+    pad_label_tensor_out = torch.cat((pad_label_tensor_out, pad_label_tensor), axis = 0)
+    pad_tokens_tensor_out = torch.cat((pad_tokens_tensor_out, pad_tokens_tensor), axis = 0)
+
+pad_tokens_tensor_out.shape()
+#############################Model
+
+import torch
+from pytorch_pretrained_bert import BertTokenizer, BertForTokenClassification
+
+# Load pre-trained model tokenizer (vocabulary)
+tokenizer = BertTokenizer.from_pretrained('bert-base-uncased')
+
+# Tokenized input
+text = train_text_df['text'].iloc[0]
+tokenized_text = tokenizer.tokenize(text)
+
+# Convert token to vocabulary indices
+indexed_tokens = tokenizer.convert_tokens_to_ids(tokenized_text)
+
+# Convert inputs to PyTorch tensors
+tokens_tensor = torch.tensor([indexed_tokens])
+
+# Load pre-trained model (weights)
+model = BertForTokenClassification.from_pretrained('bert-base-uncased', num_labels = 4)
+model.eval()
+
+# If you have a GPU, put everything on cuda
+tokens_tensor = tokens_tensor.to('cuda')
+model.to('cuda')
+
+# Predict hidden states features for each layer
+with torch.no_grad():
+    predictions = model(tokens_tensor)
+
+
